@@ -861,8 +861,55 @@ def solve_triangular(
     return x
 
 
+# FIXME:() To be factorized with numpy.
+def auto_nugget(A, func, *args, func_kw_args={}, n_auto_nugget=16, base_relative_nugget=10**(-15), verbose=False):
+    try:
+        return func(A, *args, **func_kw_args)
+    except torch._C._LinAlgError as e:
+        for cpt in range(n_auto_nugget):
+            relative_nugget = 10**(cpt) * base_relative_nugget
+            if verbose:
+                print("Try relative nugget: {}".format(relative_nugget))
+            A_nugget = A + relative_nugget * torch.diag(A.diagonal())
+            try:
+                return func(A_nugget, *args, **func_kw_args)
+            except torch._C._LinAlgError as inner_e:
+                if verbose:
+                    print(inner_e)
+                pass
+        print(e)
+        print("Covariance matrix: {}".format(A))
+        # print("Condition number: {} (log10) with relative nugget: {}".format(
+        #         torch.log10(torch.linalg.cond(A_nugget)),
+        #         relative_nugget
+        #     )
+        # )
+        # print("Eigenvalues of jittered covariance matrix: {}".format(torch.linalg.eig(A_nugget)[0]))
+        raise RuntimeError("Non positive-definite matrix: {}".format(A))
+
+
+def cholesky_with_margin(A, *args, **kwargs):
+    C = cholesky(A, *args, **kwargs)
+    C_diag = C.diagonal()
+    assert (C_diag > 0).all(), "Invalid cholesky diagonal: {}".format(C_diag)
+
+    cond_C = C_diag.max() / C_diag.min()
+    # We want the inverse of the square of the condition number of C
+    # to be greater than 100*eps  (-6.827 = .5*log10(100*eps))
+    if cond_C > 10**(6.827):
+        raise torch._C._LinAlgError(
+            "Condition number of cholesky factor: {} (log10) was too high.".format(log10(cond_C))
+        )
+
+    return C
+
+
+def safe_cholesky(A, *args, upper=False, out=None):
+    return auto_nugget(A, cholesky_with_margin, *args, func_kw_args={"upper": upper, "out": out}, verbose=True)
+
+
 def cho_factor(A, lower=False, overwrite_a=False, check_finite=True):
-    C = cholesky(A, upper=not lower)
+    C = safe_cholesky(A, upper=not lower)
     return (C, lower)
 
 
@@ -875,14 +922,14 @@ def cho_solve(c_and_lower, b, overwrite_b=False, check_finite=True):
 def cholesky_solve(A, b):
     if b.dim() == 1:
         b = b.reshape(-1, 1)
-    L = cholesky(A)
+    L = safe_cholesky(A)
     y = torch.linalg.solve_triangular(L, b, upper=False)
     x = torch.linalg.solve_triangular(L.t(), y, upper=True)
     return x, L
 
 
 def cholesky_inv(A):
-    C = cholesky(A)
+    C = safe_cholesky(A)
     return torch.cholesky_inverse(C)
 
 # ..................................................

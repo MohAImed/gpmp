@@ -87,7 +87,7 @@ def maternp_covariance_ii_or_tt(x, p, param, pairwise=False):
     """
     sigma2 = gnp.exp(param[0])
     loginvrho = param[1:]
-    nugget = 10.0 * sigma2 * gnp.finfo(gnp.float64).eps
+    nugget = 0.0# 10.0 * sigma2 * gnp.finfo(gnp.float64).eps
     if pairwise:
         return sigma2 * gnp.ones((x.shape[0],))
     K = gnp.scaled_distance(loginvrho, x, x)
