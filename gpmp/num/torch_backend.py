@@ -888,8 +888,24 @@ def auto_nugget(A, func, *args, func_kw_args={}, n_auto_nugget=16, base_relative
         raise RuntimeError("Non positive-definite matrix: {}".format(A))
 
 
+def cholesky_with_margin(A, *args, **kwargs):
+    C = cholesky(A, *args, **kwargs)
+    C_diag = C.diagonal()
+    assert (C_diag > 0).all(), "Invalid cholesky diagonal: {}".format(C_diag)
+
+    cond_C = C_diag.max() / C_diag.min()
+    # We want the inverse of the square of the condition number of C
+    # to be greater than 100*eps  (-6.827 = .5*log10(100*eps))
+    if cond_C > 10**(6.827):
+        raise torch._C._LinAlgError(
+            "Condition number of cholesky factor: {} (log10) was too high.".format(log10(cond_C))
+        )
+
+    return C
+
+
 def safe_cholesky(A, *args, upper=False, out=None):
-    return auto_nugget(A, cholesky, *args, func_kw_args={"upper": upper, "out": out}, verbose=True)
+    return auto_nugget(A, cholesky_with_margin, *args, func_kw_args={"upper": upper, "out": out}, verbose=True)
 
 
 def cho_factor(A, lower=False, overwrite_a=False, check_finite=True):
